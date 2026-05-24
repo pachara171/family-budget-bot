@@ -19,9 +19,19 @@ from linebot.v3.webhooks import (
 
 import gspread
 from google.oauth2.service_account import Credentials
-from google.cloud import vision
+import requests
+import base64
 
 load_dotenv()
+
+# เขียน credentials ลงไฟล์ชั่วคราวสำหรับ google.auth.default()
+_creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+if _creds_json:
+    import tempfile
+    _f = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    _f.write(_creds_json)
+    _f.close()
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _f.name
 
 app = Flask(__name__)
 
@@ -49,7 +59,7 @@ gc = gspread.authorize(creds)
 sheet = gc.open_by_key(os.environ["SPREADSHEET_ID"]).worksheet("transactions")
 
 # Google Vision setup
-vision_client = vision.ImageAnnotatorClient(credentials=creds)
+# vision_client = vision.ImageAnnotatorClient(credentials=creds)
 
 # ---- หมวดหมู่ ----
 EXPENSE_CATEGORIES = {
@@ -164,21 +174,53 @@ def search_transactions(keyword):
 
     return "\n".join(lines)
 
-def extract_amount_from_slip(image_bytes):
-    """OCR สลิปธนาคารด้วย Google Vision"""
-    image = vision.Image(content=image_bytes)
-    response = vision_client.text_detection(image=image)
+# def extract_amount_from_slip(image_bytes):
+#     """OCR สลิปธนาคารด้วย Google Vision"""
+#     image = vision.Image(content=image_bytes)
+#     response = vision_client.text_detection(image=image)
 
-    if response.error.message:
+#     if response.error.message:
+#         return None, None
+
+#     full_text = response.text_annotations[0].description if response.text_annotations else ""
+
+#     # หายอดเงิน (รูปแบบ: 1,234.56 หรือ 1234.56)
+#     amounts = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b', full_text)
+#     amounts = [float(a.replace(',', '')) for a in amounts if float(a.replace(',', '')) > 0]
+
+#     # เอายอดที่ใหญ่ที่สุด (มักเป็นยอดโอน)
+#     main_amount = max(amounts) if amounts else None
+
+#     return main_amount, full_text[:200]
+
+def extract_amount_from_slip(image_bytes):
+    """OCR สลิปด้วย Google Vision REST API"""
+    # encode รูปเป็น base64
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+    # ขอ token จาก service account
+    import google.auth.transport.requests
+    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-vision"])
+    credentials.refresh(google.auth.transport.requests.Request())
+    token = credentials.token
+
+    url = "https://vision.googleapis.com/v1/images:annotate"
+    payload = {
+        "requests": [{
+            "image": {"content": b64},
+            "features": [{"type": "TEXT_DETECTION"}]
+        }]
+    }
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.post(url, json=payload, headers=headers).json()
+
+    try:
+        full_text = resp["responses"][0]["textAnnotations"][0]["description"]
+    except (KeyError, IndexError):
         return None, None
 
-    full_text = response.text_annotations[0].description if response.text_annotations else ""
-
-    # หายอดเงิน (รูปแบบ: 1,234.56 หรือ 1234.56)
     amounts = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b', full_text)
     amounts = [float(a.replace(',', '')) for a in amounts if float(a.replace(',', '')) > 0]
-
-    # เอายอดที่ใหญ่ที่สุด (มักเป็นยอดโอน)
     main_amount = max(amounts) if amounts else None
 
     return main_amount, full_text[:200]

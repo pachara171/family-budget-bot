@@ -2,6 +2,6 @@ flask==3.0.0
 line-bot-sdk==3.9.0
 gspread==6.0.0
 google-auth==2.27.0
-google-cloud-vision==3.7.0
+requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
