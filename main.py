@@ -34,9 +34,17 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
-creds = Credentials.from_service_account_file(
-    os.environ["GOOGLE_CREDENTIALS_PATH"], scopes=SCOPES
-)
+creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+if creds_json:
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        f.write(creds_json)
+        creds_path = f.name
+else:
+    creds_path = os.environ["GOOGLE_CREDENTIALS_PATH"]
+creds = Credentials.from_service_account_file(creds_path, scopes=SCOPES)
+# creds = Credentials.from_service_account_file(
+#     os.environ["GOOGLE_CREDENTIALS_PATH"], scopes=SCOPES
+# )
 gc = gspread.authorize(creds)
 sheet = gc.open_by_key(os.environ["SPREADSHEET_ID"]).worksheet("transactions")
 
